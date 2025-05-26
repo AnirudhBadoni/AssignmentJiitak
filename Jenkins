@@ -1,0 +1,55 @@
+pipeline {
+    agent any
+
+    environment {
+        DOCKERHUB_CREDENTIALS = credentials('dockerhub-creds') // Jenkins credentials ID
+        SSH_KEY = credentials('ssh-key')                       // Jenkins credentials ID (Private key)
+        REMOTE_HOST = '13.126.29.215'
+        REMOTE_USER = 'ubuntu'
+        IMAGE_NAME = 'anirudhbadoni/webapp'
+    }
+
+    stages {
+        stage('Checkout Code') {
+            steps {
+                git url: 'https://github.com/AnirudhBadoni/AssignmentJiitak.git', branch: 'main'
+            }
+        }
+
+        stage('Build Docker Image') {
+            steps {
+                sh 'docker build -t $IMAGE_NAME:latest .'
+            }
+        }
+
+        stage('Login to Docker Hub') {
+            steps {
+                sh 'echo $DOCKERHUB_CREDENTIALS_PSW | docker login -u $DOCKERHUB_CREDENTIALS_USR --password-stdin'
+            }
+        }
+
+        stage('Push Docker Image') {
+            steps {
+                sh 'docker push $IMAGE_NAME:latest'
+            }
+        }
+
+        stage('Deploy on EC2') {
+            steps {
+               sshagent (credentials: ['ssh-key']) {
+                   catchError(buildResult: 'SUCCESS', stageResult: 'FAILURE') {
+                        sh """
+                            ssh -o StrictHostKeyChecking=no $REMOTE_USER@$REMOTE_HOST << "EOF"
+                                docker pull $IMAGE_NAME:latest
+                                docker stop webapp || true
+                                docker rm webapp || true
+                                docker run -d --name webapp -p 80:5000 $IMAGE_NAME:latest
+                            EOF
+                        """
+                   }
+               
+               }
+            }
+        }
+    }
+}
